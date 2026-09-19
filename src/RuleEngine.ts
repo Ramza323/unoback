@@ -18,7 +18,8 @@ export function canRespondToPenalty(card: Card, penalty: GameState['penalty']): 
 
 export function canSteal(card: Card, lastPlayed: Card, declaredColor: Color | null, penalty: GameState['penalty']): boolean {
   if (penalty) return canRespondToPenalty(card, penalty);
-  // Mismo valor y mismo color efectivo
+  // Wild vs Wild: mismo tipo sin importar color declarado
+  if ((card.value === 'wild' || card.value === 'wild4') && card.value === lastPlayed.value) return true;
   const effectiveColor: Color = (lastPlayed.value === 'wild' || lastPlayed.value === 'wild4')
     ? (declaredColor ?? lastPlayed.color)
     : lastPlayed.color;

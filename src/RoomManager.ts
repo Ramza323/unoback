@@ -63,11 +63,7 @@ export function markDisconnected(playerId: string): { room: Room; playerIdx: num
       return { room, playerIdx: -1 };
     }
 
-    // Durante partida: marcar como desconectado, devolver cartas al mazo
-    if (player.hand.length > 0) {
-      room.game.deck = shuffle([...room.game.deck, ...player.hand]);
-      player.hand = [];
-    }
+    // Durante partida: conservar mano para permitir reconexión dentro del grace period
 
     // Cambiar host si era el host
     if (room.hostId === playerId) {
@@ -87,11 +83,11 @@ export function advanceIndexAfterDisconnect(room: Room, removedIdx: number): voi
 
   // Si era el turno del jugador desconectado, o el índice quedó fuera de rango
   if (room.game.currentPlayerIndex === removedIdx) {
-    // Dar turno al siguiente jugador conectado
-    let next = removedIdx % total;
+    const direction = room.game.direction;
+    let next = (removedIdx + direction + total) % total;
     let attempts = 0;
     while (!room.players[next]?.connected && attempts < total) {
-      next = (next + 1) % total;
+      next = (next + direction + total) % total;
       attempts++;
     }
     room.game.currentPlayerIndex = next;
@@ -110,6 +106,11 @@ export function cleanupStaleDisconnects(): void {
     );
     for (const p of stale) {
       const idx = room.players.indexOf(p);
+      // Devolver cartas al mazo cuando se elimina definitivamente
+      if (p.hand.length > 0) {
+        room.game.deck = shuffle([...room.game.deck, ...p.hand]);
+        p.hand = [];
+      }
       room.players.splice(idx, 1);
     }
   }

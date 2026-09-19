@@ -258,7 +258,7 @@ io.on('connection', (socket) => {
     checkUno(room, playerIndex);
     closeStealWindow(room.id);
     applyCardEffect(room, card, playerIndex, declaredColor);
-    openStealWindow(room, card, game.currentPlayerIndex);
+    openStealWindow(room, card, playerIndex);
     broadcast(room);
   });
 
@@ -268,8 +268,8 @@ io.on('connection', (socket) => {
     const game = room.game;
     const stealerIndex = room.players.findIndex(p => p.id === socket.id);
     if (stealerIndex === -1 || !game.stealWindow) return;
-    // No puede robarse a sí mismo
-    if (stealerIndex === game.currentPlayerIndex) return;
+    // No puede robar el jugador que acaba de jugar
+    if (stealerIndex === game.stealWindow.byPlayerIndex) return;
 
     const stealer = room.players[stealerIndex];
     const cardIdx = stealer.hand.findIndex(c => c.id === cardId);
@@ -296,7 +296,7 @@ io.on('connection', (socket) => {
     checkUno(room, stealerIndex);
     applyCardEffect(room, card, stealerIndex, declaredColor);
     io.to(room.id).emit('turn-stolen', { byPlayerId: socket.id, byPlayerName: stealer.name });
-    openStealWindow(room, card, game.currentPlayerIndex);
+    openStealWindow(room, card, stealerIndex);
     broadcast(room);
   });
 
