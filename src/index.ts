@@ -3,10 +3,10 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { buildDeck, drawCards } from './Deck';
-import { canPlay, canSteal, getPenaltyAddition, isDefenseCard, nextPlayerIndex } from './RuleEngine';
+import { canPlay, canSteal, canRespondToPenalty, getPenaltyAddition, isDefenseCard, nextPlayerIndex } from './RuleEngine';
 import {
-  createRoom, getRoom, joinRoom, removePlayer,
-  getRoomByPlayer, sanitizeRoom
+  createRoom, getRoom, joinRoom, markDisconnected,
+  advanceIndexAfterDisconnect, getRoomByPlayer, sanitizeRoom
 } from './RoomManager';
 import { Card, Color, GameState, Room } from './types';
 
@@ -15,17 +15,15 @@ app.use(cors());
 app.get('/', (_, res) => res.send('UNO server running'));
 
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: '*' }
-});
+const io = new Server(httpServer, { cors: { origin: '*' } });
 
 const STEAL_WINDOW_MS = 1500;
 const stealTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function broadcast(room: Room) {
   for (const p of room.players) {
-    const socket = io.sockets.sockets.get(p.id);
-    if (socket) socket.emit('room-updated', sanitizeRoom(room, p.id));
+    const s = io.sockets.sockets.get(p.id);
+    if (s) s.emit('room-updated', sanitizeRoom(room, p.id));
   }
 }
 
@@ -50,12 +48,29 @@ function openStealWindow(room: Room, card: Card, byPlayerIndex: number) {
   stealTimers.set(room.id, timer);
 }
 
+function checkOnlyOneLeft(room: Room): boolean {
+  if (!room.game || room.game.winner) return false;
+  const connected = room.players.filter(p => p.connected);
+  if (connected.length === 1) {
+    room.game.winner = connected[0].id;
+    room.game.started = false;
+    closeStealWindow(room.id);
+    return true;
+  }
+  return false;
+}
+
 function applyCardEffect(room: Room, card: Card, playedByIndex: number, declaredColor?: Color) {
   const game = room.game!;
-  const total = room.players.length;
+  const players = room.players;
 
   if (card.value === 'wild' || card.value === 'wild4') {
-    if (declaredColor) card.color = declaredColor;
+    if (declaredColor) {
+      card.color = declaredColor;
+      game.declaredColor = declaredColor;
+    }
+  } else {
+    game.declaredColor = null;
   }
 
   if (game.penalty) {
@@ -63,23 +78,22 @@ function applyCardEffect(room: Room, card: Card, playedByIndex: number, declared
     if (addition > 0) {
       game.penalty.amount += addition;
       if (card.value === 'wild4' && declaredColor) game.penalty.color = declaredColor;
-      game.currentPlayerIndex = nextPlayerIndex(playedByIndex, total, game.direction);
+      game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
       return;
     }
     if (isDefenseCard(card)) {
+      game.penalty.color = card.color;
       if (card.value === 'skip') {
-        // bloqueo: penalty jumps to the next player
-        game.penalty.color = card.color;
-        const skipped = nextPlayerIndex(playedByIndex, total, game.direction);
-        game.currentPlayerIndex = nextPlayerIndex(skipped, total, game.direction);
+        // Bloqueo: penalidad salta al siguiente
+        const skipped = nextPlayerIndex(playedByIndex, players, game.direction);
+        game.currentPlayerIndex = nextPlayerIndex(skipped, players, game.direction);
         io.to(room.id).emit('penalty-deflected', { type: 'block', amount: game.penalty.amount });
         return;
       }
       if (card.value === 'reverse') {
-        // reversa: penalty goes back to previous
+        // Reversa: penalidad vuelve al anterior
         game.direction = game.direction === 1 ? -1 : 1;
-        const target = nextPlayerIndex(playedByIndex, total, game.direction);
-        game.penalty.color = card.color;
+        const target = nextPlayerIndex(playedByIndex, players, game.direction);
         game.currentPlayerIndex = target;
         io.to(room.id).emit('penalty-deflected', { type: 'reverse', amount: game.penalty.amount });
         return;
@@ -89,28 +103,29 @@ function applyCardEffect(room: Room, card: Card, playedByIndex: number, declared
 
   if (card.value === 'draw2') {
     game.penalty = { amount: 2, color: card.color };
-    game.currentPlayerIndex = nextPlayerIndex(playedByIndex, total, game.direction);
+    game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
     return;
   }
   if (card.value === 'wild4') {
     game.penalty = { amount: 4, color: declaredColor ?? card.color };
-    game.currentPlayerIndex = nextPlayerIndex(playedByIndex, total, game.direction);
+    game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
     return;
   }
   if (card.value === 'skip') {
-    game.currentPlayerIndex = nextPlayerIndex(playedByIndex, total, game.direction, true);
+    game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction, true);
     return;
   }
   if (card.value === 'reverse') {
-    if (total === 2) {
+    const connected = players.filter(p => p.connected).length;
+    if (connected === 2) {
       game.currentPlayerIndex = playedByIndex;
     } else {
       game.direction = game.direction === 1 ? -1 : 1;
-      game.currentPlayerIndex = nextPlayerIndex(playedByIndex, total, game.direction);
+      game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
     }
     return;
   }
-  game.currentPlayerIndex = nextPlayerIndex(playedByIndex, total, game.direction);
+  game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
 }
 
 function checkUno(room: Room, playerIndex: number) {
@@ -135,18 +150,35 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join-room', ({ roomId, name }: { roomId: string; name: string }) => {
-    const room = joinRoom(roomId.toUpperCase(), socket.id, name || 'Jugador');
-    if (!room) { socket.emit('error', { msg: 'Sala no encontrada o llena' }); return; }
+    const result = joinRoom(roomId.toUpperCase(), socket.id, name || 'Jugador');
+    if (result === 'not_found') { socket.emit('error', { msg: 'Sala no encontrada' }); return; }
+    if (result === 'full') { socket.emit('error', { msg: 'Sala llena (máx 8)' }); return; }
+    if (result === 'started') { socket.emit('error', { msg: 'La partida ya empezó' }); return; }
+    const room = result;
     socket.join(room.id);
-    broadcast(room);
     socket.emit('room-joined', sanitizeRoom(room, socket.id));
+    broadcast(room);
+  });
+
+  // Reconexión: el cliente envía su nombre y el roomId guardado
+  socket.on('rejoin-room', ({ roomId, name }: { roomId: string; name: string }) => {
+    const result = joinRoom(roomId.toUpperCase(), socket.id, name || 'Jugador');
+    if (typeof result === 'string') {
+      socket.emit('rejoin-failed', { msg: result });
+      return;
+    }
+    const room = result;
+    socket.join(room.id);
+    socket.emit('room-joined', sanitizeRoom(room, socket.id));
+    broadcast(room);
+    io.to(room.id).emit('player-reconnected', { name });
   });
 
   socket.on('change-name', ({ name }: { name: string }) => {
     const room = getRoomByPlayer(socket.id);
     if (!room) return;
     const player = room.players.find(p => p.id === socket.id);
-    if (player) player.name = name.trim().slice(0, 20) || player.name;
+    if (player && !room.game?.started) player.name = name.trim().slice(0, 20) || player.name;
     broadcast(room);
   });
 
@@ -161,12 +193,12 @@ io.on('connection', (socket) => {
   socket.on('start-game', () => {
     const room = getRoomByPlayer(socket.id);
     if (!room || room.hostId !== socket.id) return;
-    if (room.players.length < 2) { socket.emit('error', { msg: 'Se necesitan al menos 2 jugadores' }); return; }
+    const connected = room.players.filter(p => p.connected);
+    if (connected.length < 2) { socket.emit('error', { msg: 'Se necesitan al menos 2 jugadores' }); return; }
 
     const deck = buildDeck();
-    room.players.forEach(p => { p.hand = deck.splice(0, 7); p.saidUno = false; });
+    room.players.forEach(p => { p.hand = p.connected ? deck.splice(0, 7) : []; p.saidUno = false; });
 
-    // First face-up card must not be Wild/Wild4
     let startCard = deck.splice(0, 1)[0];
     while (startCard.value === 'wild' || startCard.value === 'wild4') {
       deck.push(startCard);
@@ -179,10 +211,16 @@ io.on('connection', (socket) => {
       currentPlayerIndex: 0,
       direction: 1,
       penalty: null,
+      declaredColor: null,
       stealWindow: null,
       started: true,
       winner: null,
     };
+
+    // Asegurar que el primer turno sea de un jugador conectado
+    if (!room.players[0]?.connected) {
+      room.game.currentPlayerIndex = nextPlayerIndex(-1, room.players, 1);
+    }
 
     broadcast(room);
   });
@@ -201,30 +239,23 @@ io.on('connection', (socket) => {
     const card = player.hand[cardIdx];
     const topCard = game.discardPile[game.discardPile.length - 1];
 
-    if (!canPlay(card, topCard, game.penalty, game.discardPile.length > 1 ? undefined : undefined)) {
+    if (!canPlay(card, topCard, game.penalty, game.declaredColor)) {
       socket.emit('error', { msg: 'Jugada no válida' }); return;
     }
 
-    if (game.penalty && getPenaltyAddition(card) === 0 && !isDefenseCard(card)) {
-      // Must draw penalty instead
-      socket.emit('error', { msg: 'Debes responder al acumulado o robar' }); return;
-    }
-
     player.hand.splice(cardIdx, 1);
-
-    if (game.penalty && getPenaltyAddition(card) === 0 && !isDefenseCard(card)) {
-      socket.emit('error', { msg: 'Jugada inválida contra el acumulado' }); return;
-    }
-
     game.discardPile.push(card);
-    checkUno(room, playerIndex);
 
+    // Verificar victoria ANTES de checkUno
     if (player.hand.length === 0) {
       game.winner = player.id;
+      game.started = false;
+      closeStealWindow(room.id);
       broadcast(room);
       return;
     }
 
+    checkUno(room, playerIndex);
     closeStealWindow(room.id);
     applyCardEffect(room, card, playerIndex, declaredColor);
     openStealWindow(room, card, game.currentPlayerIndex);
@@ -237,6 +268,8 @@ io.on('connection', (socket) => {
     const game = room.game;
     const stealerIndex = room.players.findIndex(p => p.id === socket.id);
     if (stealerIndex === -1 || !game.stealWindow) return;
+    // No puede robarse a sí mismo
+    if (stealerIndex === game.currentPlayerIndex) return;
 
     const stealer = room.players[stealerIndex];
     const cardIdx = stealer.hand.findIndex(c => c.id === cardId);
@@ -245,21 +278,22 @@ io.on('connection', (socket) => {
     const card = stealer.hand[cardIdx];
     const lastCard = game.stealWindow.card;
 
-    if (!canSteal(card, lastCard, game.penalty)) {
+    if (!canSteal(card, lastCard, game.declaredColor, game.penalty)) {
       socket.emit('error', { msg: 'No puedes robar turno con esa carta' }); return;
     }
 
     stealer.hand.splice(cardIdx, 1);
     game.discardPile.push(card);
     closeStealWindow(room.id);
-    checkUno(room, stealerIndex);
 
     if (stealer.hand.length === 0) {
       game.winner = stealer.id;
+      game.started = false;
       broadcast(room);
       return;
     }
 
+    checkUno(room, stealerIndex);
     applyCardEffect(room, card, stealerIndex, declaredColor);
     io.to(room.id).emit('turn-stolen', { byPlayerId: socket.id, byPlayerName: stealer.name });
     openStealWindow(room, card, game.currentPlayerIndex);
@@ -275,20 +309,13 @@ io.on('connection', (socket) => {
 
     closeStealWindow(room.id);
 
-    if (game.penalty) {
-      const { drawn, deck, discardPile } = drawCards(game.deck, game.discardPile, game.penalty.amount);
-      room.players[playerIndex].hand.push(...drawn);
-      game.deck = deck;
-      game.discardPile = discardPile;
-      game.penalty = null;
-    } else {
-      const { drawn, deck, discardPile } = drawCards(game.deck, game.discardPile, 1);
-      room.players[playerIndex].hand.push(...drawn);
-      game.deck = deck;
-      game.discardPile = discardPile;
-    }
-
-    game.currentPlayerIndex = nextPlayerIndex(playerIndex, room.players.length, game.direction);
+    const count = game.penalty ? game.penalty.amount : 1;
+    const { drawn, deck, discardPile } = drawCards(game.deck, game.discardPile, count);
+    room.players[playerIndex].hand.push(...drawn);
+    game.deck = deck;
+    game.discardPile = discardPile;
+    game.penalty = null;
+    game.currentPlayerIndex = nextPlayerIndex(playerIndex, room.players, game.direction);
     broadcast(room);
   });
 
@@ -299,9 +326,52 @@ io.on('connection', (socket) => {
     if (player) player.saidUno = true;
   });
 
+  socket.on('force-end-game', () => {
+    const room = getRoomByPlayer(socket.id);
+    if (!room || room.hostId !== socket.id || !room.game) return;
+    closeStealWindow(room.id);
+    room.game = null;
+    room.players.forEach(p => { p.hand = []; p.isReady = false; p.saidUno = false; });
+    broadcast(room);
+  });
+
   socket.on('disconnect', () => {
-    const room = removePlayer(socket.id);
-    if (room) broadcast(room);
+    console.log('disconnected', socket.id);
+    const result = markDisconnected(socket.id);
+    if (!result) return;
+    const { room, playerIdx } = result;
+
+    if (playerIdx === -1) {
+      // Fue removido directo (lobby)
+      broadcast(room);
+      return;
+    }
+
+    // Durante partida
+    if (room.game) {
+      closeStealWindow(room.id);
+      // Limpiar penalty si era el turno del jugador penalizado
+      if (playerIdx === room.game.currentPlayerIndex && room.game.penalty) {
+        room.game.penalty = null;
+      }
+      // Ajustar turno
+      advanceIndexAfterDisconnect(room, playerIdx);
+      // Verificar si solo queda uno conectado
+      if (!checkOnlyOneLeft(room)) {
+        // Si el nuevo currentPlayerIndex es el jugador desconectado, avanzar
+        const curr = room.players[room.game.currentPlayerIndex];
+        if (curr && !curr.connected) {
+          room.game.currentPlayerIndex = nextPlayerIndex(
+            room.game.currentPlayerIndex, room.players, room.game.direction
+          );
+        }
+      }
+    }
+
+    io.to(room.id).emit('player-disconnected', {
+      name: room.players.find((_, i) => i === playerIdx)?.name ?? 'Jugador',
+    });
+    broadcast(room);
   });
 });
 

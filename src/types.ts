@@ -8,16 +8,18 @@ export interface Card {
 }
 
 export interface Player {
-  id: string;       // socket id
+  id: string;       // socket id (cambia en cada reconexión)
   name: string;
   hand: Card[];
   isReady: boolean;
   saidUno: boolean;
+  connected: boolean;
+  disconnectedAt?: number;
 }
 
 export interface PenaltyStack {
   amount: number;
-  color: Color;     // color that must be matched to respond
+  color: Color;
 }
 
 export interface GameState {
@@ -26,6 +28,7 @@ export interface GameState {
   currentPlayerIndex: number;
   direction: 1 | -1;
   penalty: PenaltyStack | null;
+  declaredColor: Color | null;  // color activo después de un Wild
   stealWindow: {
     card: Card;
     byPlayerIndex: number;
