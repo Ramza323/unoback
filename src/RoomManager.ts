@@ -29,9 +29,11 @@ export function joinRoom(roomId: string, playerId: string, name: string): Room |
   // Reconexión: buscar jugador desconectado con el mismo nombre
   const disconnected = room.players.find(p => p.name === name && !p.connected);
   if (disconnected) {
+    const oldId = disconnected.id;
     disconnected.id = playerId;
     disconnected.connected = true;
     disconnected.disconnectedAt = undefined;
+    if (room.hostId === oldId) room.hostId = playerId;
     return room;
   }
 

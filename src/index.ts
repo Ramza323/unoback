@@ -192,7 +192,8 @@ io.on('connection', (socket) => {
 
   socket.on('start-game', () => {
     const room = getRoomByPlayer(socket.id);
-    if (!room || room.hostId !== socket.id) return;
+    if (!room) return;
+    if (room.hostId !== socket.id) { socket.emit('error', { msg: 'Solo el host puede iniciar' }); return; }
     const connected = room.players.filter(p => p.connected);
     if (connected.length < 2) { socket.emit('error', { msg: 'Se necesitan al menos 2 jugadores' }); return; }
 
