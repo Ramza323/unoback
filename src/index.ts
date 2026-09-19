@@ -6,7 +6,7 @@ import { buildDeck, drawCards } from './Deck';
 import { canPlay, canSteal, canRespondToPenalty, getPenaltyAddition, isDefenseCard, nextPlayerIndex } from './RuleEngine';
 import {
   createRoom, getRoom, joinRoom, markDisconnected,
-  advanceIndexAfterDisconnect, getRoomByPlayer, sanitizeRoom
+  advanceIndexAfterDisconnect, getRoomByPlayer, sanitizeRoom, cleanupStaleDisconnects
 } from './RoomManager';
 import { Card, Color, GameState, Room } from './types';
 
@@ -374,6 +374,8 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 });
+
+setInterval(cleanupStaleDisconnects, 10_000);
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => console.log(`UNO server on port ${PORT}`));
