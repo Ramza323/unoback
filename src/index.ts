@@ -77,7 +77,7 @@ function applyCardEffect(room: Room, card: Card, playedByIndex: number, declared
     const addition = getPenaltyAddition(card);
     if (addition > 0) {
       game.penalty.amount += addition;
-      if (card.value === 'wild4' && declaredColor) game.penalty.color = declaredColor;
+      game.penalty.color = card.value === 'wild4' ? (declaredColor ?? card.color) : card.color;
       game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
       return;
     }

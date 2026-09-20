@@ -12,8 +12,9 @@ export function canPlay(card: Card, topCard: Card, penalty: GameState['penalty']
 export function canRespondToPenalty(card: Card, penalty: GameState['penalty']): boolean {
   if (!penalty) return false;
   if (card.value === 'wild4') return true;
+  if (card.value === 'draw2') return true; // cualquier +2 apila sin importar color
   if (card.color !== penalty.color) return false;
-  return card.value === 'draw2' || card.value === 'skip' || card.value === 'reverse';
+  return card.value === 'skip' || card.value === 'reverse';
 }
 
 export function canSteal(card: Card, lastPlayed: Card, declaredColor: Color | null, penalty: GameState['penalty']): boolean {
