@@ -90,9 +90,8 @@ function applyCardEffect(room: Room, card: Card, playedByIndex: number, declared
         return;
       }
       if (card.value === 'reverse') {
-        // Reversa: penalidad vuelve al anterior
-        const connectedCount = players.filter(p => p.connected).length;
-        if (connectedCount > 2) game.direction = game.direction === 1 ? -1 : 1;
+        // Reversa: penalidad vuelve al anterior e invierte dirección
+        game.direction = game.direction === 1 ? -1 : 1;
         const target = nextPlayerIndex(playedByIndex, players, game.direction);
         game.currentPlayerIndex = target;
         io.to(room.id).emit('penalty-deflected', { type: 'reverse', amount: game.penalty.amount });
