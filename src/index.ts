@@ -84,15 +84,15 @@ function applyCardEffect(room: Room, card: Card, playedByIndex: number, declared
     if (isDefenseCard(card)) {
       game.penalty.color = card.color;
       if (card.value === 'skip') {
-        // Bloqueo: penalidad salta al siguiente
-        const skipped = nextPlayerIndex(playedByIndex, players, game.direction);
-        game.currentPlayerIndex = nextPlayerIndex(skipped, players, game.direction);
+        // Bloqueo: penalidad pasa al siguiente jugador (1 salto)
+        game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
         io.to(room.id).emit('penalty-deflected', { type: 'block', amount: game.penalty.amount });
         return;
       }
       if (card.value === 'reverse') {
         // Reversa: penalidad vuelve al anterior
-        game.direction = game.direction === 1 ? -1 : 1;
+        const connectedCount = players.filter(p => p.connected).length;
+        if (connectedCount > 2) game.direction = game.direction === 1 ? -1 : 1;
         const target = nextPlayerIndex(playedByIndex, players, game.direction);
         game.currentPlayerIndex = target;
         io.to(room.id).emit('penalty-deflected', { type: 'reverse', amount: game.penalty.amount });
