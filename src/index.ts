@@ -3,14 +3,14 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { buildDeck, drawCards } from './Deck';
-import { canPlay, canSteal, canRespondToPenalty, getPenaltyAddition, isDefenseCard, nextPlayerIndex } from './RuleEngine';
+import { canPlay, canSteal, canSelfSteal, canRespondToPenalty, getPenaltyAddition, isDefenseCard, nextPlayerIndex } from './RuleEngine';
 import {
   createRoom, getRoom, joinRoom, markDisconnected,
   advanceIndexAfterDisconnect, getRoomByPlayer, sanitizeRoom, cleanupStaleDisconnects
 } from './RoomManager';
 import { Card, Color, GameState, Room } from './types';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 
 const app = express();
 app.use(cors());
@@ -271,9 +271,8 @@ io.on('connection', (socket) => {
     const game = room.game;
     const stealerIndex = room.players.findIndex(p => p.id === socket.id);
     if (stealerIndex === -1 || !game.stealWindow) return;
-    // No puede robar el jugador que acaba de jugar
-    if (stealerIndex === game.stealWindow.byPlayerIndex) return;
 
+    const isSelf = stealerIndex === game.stealWindow.byPlayerIndex;
     const stealer = room.players[stealerIndex];
     const cardIdx = stealer.hand.findIndex(c => c.id === cardId);
     if (cardIdx === -1) return;
@@ -281,8 +280,12 @@ io.on('connection', (socket) => {
     const card = stealer.hand[cardIdx];
     const lastCard = game.stealWindow.card;
 
-    if (!canSteal(card, lastCard, game.declaredColor, game.penalty)) {
-      socket.emit('error', { msg: 'No puedes robar turno con esa carta' }); return;
+    if (isSelf) {
+      if (!canSelfSteal(card, lastCard)) return;
+    } else {
+      if (!canSteal(card, lastCard, game.declaredColor, game.penalty)) {
+        socket.emit('error', { msg: 'No puedes robar turno con esa carta' }); return;
+      }
     }
 
     stealer.hand.splice(cardIdx, 1);
@@ -298,7 +301,7 @@ io.on('connection', (socket) => {
 
     checkUno(room, stealerIndex);
     applyCardEffect(room, card, stealerIndex, declaredColor);
-    io.to(room.id).emit('turn-stolen', { byPlayerId: socket.id, byPlayerName: stealer.name });
+    if (!isSelf) io.to(room.id).emit('turn-stolen', { byPlayerId: socket.id, byPlayerName: stealer.name });
     openStealWindow(room, card, stealerIndex);
     broadcast(room);
   });

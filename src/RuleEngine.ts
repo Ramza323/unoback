@@ -27,6 +27,11 @@ export function canSteal(card: Card, lastPlayed: Card, declaredColor: Color | nu
   return card.color === effectiveColor && card.value === lastPlayed.value;
 }
 
+export function canSelfSteal(card: Card, lastPlayed: Card): boolean {
+  if (card.value === 'wild' || card.value === 'wild4') return false;
+  return card.value === lastPlayed.value && card.color === lastPlayed.color;
+}
+
 export function getPenaltyAddition(card: Card): number {
   if (card.value === 'draw2') return 2;
   if (card.value === 'wild4') return 4;
