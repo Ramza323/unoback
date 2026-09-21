@@ -48,13 +48,15 @@ export function drawCards(deck: Card[], discardPile: Card[], count: number): { d
   let d = [...deck];
   const discard = [...discardPile];
 
-  if (d.length < count) {
+  // Reciclar el descarte si no alcanza (solo si hay más de 1 carta en el descarte)
+  if (d.length < count && discard.length > 1) {
     const top = discard.pop()!;
     d = [...shuffle(discard), ...d];
     discard.length = 0;
     discard.push(top);
   }
 
-  const drawn = d.splice(0, count);
+  // Robar lo que haya disponible (puede ser menos que count si la baraja está agotada)
+  const drawn = d.splice(0, Math.min(count, d.length));
   return { drawn, deck: d, discardPile: discard };
 }
