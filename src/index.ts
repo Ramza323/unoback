@@ -10,7 +10,7 @@ import {
 } from './RoomManager';
 import { Card, Color, GameState, Room } from './types';
 
-export const VERSION = '1.1.2';
+export const VERSION = '1.1.3';
 
 const app = express();
 app.use(cors());
@@ -341,6 +341,7 @@ io.on('connection', (socket) => {
     if (!room || room.hostId !== socket.id || !room.game) return;
     closeStealWindow(room.id);
     room.game = null;
+    room.players = room.players.filter(p => p.connected);
     room.players.forEach(p => { p.hand = []; p.isReady = false; p.saidUno = false; });
     broadcast(room);
   });
