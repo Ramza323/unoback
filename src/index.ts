@@ -10,7 +10,7 @@ import {
 } from './RoomManager';
 import { Card, Color, GameState, Room } from './types';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.1.1';
 
 const app = express();
 app.use(cors());
@@ -81,6 +81,7 @@ function applyCardEffect(room: Room, card: Card, playedByIndex: number, declared
     if (addition > 0) {
       game.penalty.amount += addition;
       game.penalty.color = card.value === 'wild4' ? (declaredColor ?? card.color) : card.color;
+      game.penalty.source = card.value === 'wild4' ? 'wild4' : 'draw2';
       game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
       return;
     }
@@ -104,12 +105,12 @@ function applyCardEffect(room: Room, card: Card, playedByIndex: number, declared
   }
 
   if (card.value === 'draw2') {
-    game.penalty = { amount: 2, color: card.color };
+    game.penalty = { amount: 2, color: card.color, source: 'draw2' };
     game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
     return;
   }
   if (card.value === 'wild4') {
-    game.penalty = { amount: 4, color: declaredColor ?? card.color };
+    game.penalty = { amount: 4, color: declaredColor ?? card.color, source: 'wild4' };
     game.currentPlayerIndex = nextPlayerIndex(playedByIndex, players, game.direction);
     return;
   }

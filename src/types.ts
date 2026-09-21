@@ -20,6 +20,7 @@ export interface Player {
 export interface PenaltyStack {
   amount: number;
   color: Color;
+  source: 'draw2' | 'wild4';
 }
 
 export interface GameState {
