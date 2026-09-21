@@ -10,7 +10,7 @@ import {
 } from './RoomManager';
 import { Card, Color, GameState, Room } from './types';
 
-export const VERSION = '1.1.1';
+export const VERSION = '1.1.2';
 
 const app = express();
 app.use(cors());
@@ -330,7 +330,10 @@ io.on('connection', (socket) => {
     const room = getRoomByPlayer(socket.id);
     if (!room) return;
     const player = room.players.find(p => p.id === socket.id);
-    if (player) player.saidUno = true;
+    if (player) {
+      player.saidUno = true;
+      io.to(room.id).emit('uno-said', { playerId: socket.id, playerName: player.name });
+    }
   });
 
   socket.on('force-end-game', () => {
