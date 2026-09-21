@@ -10,9 +10,12 @@ import {
 } from './RoomManager';
 import { Card, Color, GameState, Room } from './types';
 
+export const VERSION = '1.0.0';
+
 const app = express();
 app.use(cors());
 app.get('/', (_, res) => res.send('UNO server running'));
+app.get('/version', (_, res) => res.json({ version: VERSION }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
